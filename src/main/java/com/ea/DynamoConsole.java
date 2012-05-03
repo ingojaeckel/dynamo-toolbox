@@ -11,24 +11,11 @@ import com.amazonaws.services.dynamodb.model.GetItemResult;
 import com.amazonaws.services.dynamodb.model.Key;
 import com.amazonaws.services.dynamodb.model.ScanRequest;
 import com.amazonaws.services.dynamodb.model.ScanResult;
-import com.google.inject.AbstractModule;
-import com.google.inject.Guice;
 import com.google.inject.Inject;
-import com.google.inject.Injector;
+import com.google.inject.Singleton;
 
+@Singleton
 public class DynamoConsole {
-	public static void main(String[] args) {
-		final Injector injector = Guice.createInjector(new AccessModule(), new AbstractModule() {
-			@Override
-			protected void configure() {
-				bind(Console.class).toInstance(System.console());
-			}
-		});
-
-		final DynamoConsole consoleTest = injector.getInstance(DynamoConsole.class);
-		consoleTest.start();
-	}
-	
 	private final Console console;
 	private final DynamoHelper helper;
 	private final AmazonDynamoDBAsyncClient aws;
@@ -39,10 +26,10 @@ public class DynamoConsole {
 		this.helper = helper;
 		this.console = console;
 	}
-	
+
 	public void start() {
 		printHelp();
-		
+
 		while (eatCommand()) {
 		}
 		console.printf("Bye, bye.\n");
@@ -56,6 +43,8 @@ public class DynamoConsole {
 
 		if (command.isEmpty() || command.equals("q")) {
 			return false;
+		} else if ("l".equals(command) && args.length == 1) {
+			handleListTables();
 		} else if ("s".equals(command) && args.length == 2) {
 			handleScan(args[1]);
 		} else if ("p".equals(command) && args.length == 2) {
@@ -69,36 +58,41 @@ public class DynamoConsole {
 		return true;
 	}
 
-	private void handleScan(final String tableName) {
-		loading();
-		
-		final ScanResult result = aws.scan(new ScanRequest(tableName).withLimit(10));
-		final List<Map<String, AttributeValue>> items = result.getItems();
-		
-		for (final Map<String, AttributeValue> item: items) {
-			console.printf("item: '%s'\n", item.toString());
+	@LongRunning
+	public void handleListTables() {
+		for (final String tableName : helper.listTables()) {
+			console.printf("table: '%s'\n", tableName);
 		}
-		
-		done();
 	}
 
-	private void handlePurge(final String tableName) {
+	@LongRunning
+	public void handleScan(final String tableName) {
+		final ScanResult result = aws.scan(new ScanRequest(tableName).withLimit(10));
+		final List<Map<String, AttributeValue>> items = result.getItems();
+
+		for (final Map<String, AttributeValue> item : items) {
+			console.printf("item: '%s'\n", item.toString());
+		}
+	}
+
+	@LongRunning
+	public void handlePurge(final String tableName) {
 		if (confirm("This will delete and re-create '%s'.\nMake sure do have a backup of all your data!\nAre you sure? [yN] ", tableName)) {
 			if (helper.purgeTable(tableName)) {
 				done();
 			} else {
 				error();
-			}			
+			}
 		} else {
 			status("Cancelled by user.\n");
 		}
 	}
-	
+
 	private void done() {
 		console.printf("Done.\n");
 	}
 
-	private boolean confirm(final String formatString, final Object...arguments) {
+	private boolean confirm(final String formatString, final Object... arguments) {
 		return "y".equals(console.readLine(formatString, arguments));
 	}
 
@@ -132,6 +126,7 @@ public class DynamoConsole {
 	private void printHelp() {
 		console.printf("h           show help\n");
 		console.printf("q           quit\n");
+		console.printf("l           list tables\n");
 		console.printf("p TABLE     purge; drop all data of the table, re-creates the table\n");
 		console.printf("s TABLE     scan; show the first 10 items of the table\n");
 		console.printf("g TABLE ID  get item from table\n");

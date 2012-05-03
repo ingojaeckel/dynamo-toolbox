@@ -1,5 +1,7 @@
 package com.ea;
 
+import java.util.List;
+
 import com.amazonaws.AmazonServiceException;
 import com.amazonaws.services.dynamodb.AmazonDynamoDBAsyncClient;
 import com.amazonaws.services.dynamodb.model.CreateTableRequest;
@@ -8,8 +10,11 @@ import com.amazonaws.services.dynamodb.model.DescribeTableRequest;
 import com.amazonaws.services.dynamodb.model.DescribeTableResult;
 import com.amazonaws.services.dynamodb.model.KeySchema;
 import com.amazonaws.services.dynamodb.model.KeySchemaElement;
+import com.amazonaws.services.dynamodb.model.ListTablesRequest;
+import com.amazonaws.services.dynamodb.model.ListTablesResult;
 import com.amazonaws.services.dynamodb.model.ProvisionedThroughput;
 import com.amazonaws.services.dynamodb.model.ScalarAttributeType;
+import com.amazonaws.services.dynamodb.model.TableDescription;
 import com.amazonaws.services.dynamodb.model.TableStatus;
 import com.google.inject.Inject;
 import com.google.inject.Singleton;
@@ -45,14 +50,13 @@ public class DynamoHelper {
 			aws.deleteTable(new DeleteTableRequest(table));
 			return waitForTableToBeDeleted(table);
 		} catch (AmazonServiceException exception) {
-			// Table did not exist
-			return false;
+			throw exception;
 		}
 	}
 
 	public boolean purgeTable(final String table) {
 		try {
-			final CreateTableRequest request = toCreateTableRequest(aws.describeTable(new DescribeTableRequest().withTableName(table)));
+			final CreateTableRequest request = toCreateTableRequest(aws.describeTable(new DescribeTableRequest().withTableName(table)).getTable());
 
 			if (deleteTable(table)) {
 				aws.createTable(request);
@@ -66,17 +70,21 @@ public class DynamoHelper {
 				return false;
 			}
 		} catch (AmazonServiceException exception) {
-			// Maybe the table was not found.
-			return false;
+			throw exception;
 		}
 	}
-	
-	private CreateTableRequest toCreateTableRequest(final DescribeTableResult describeResult) {
-		final long reads = describeResult.getTable().getProvisionedThroughput().getReadCapacityUnits();
-		final long writes = describeResult.getTable().getProvisionedThroughput().getWriteCapacityUnits();
+
+	public List<String> listTables() {
+		final ListTablesResult result = aws.listTables(new ListTablesRequest());
+		return result.getTableNames();
+	}
+
+	private CreateTableRequest toCreateTableRequest(final TableDescription tableDescription) {
+		final long reads = tableDescription.getProvisionedThroughput().getReadCapacityUnits();
+		final long writes = tableDescription.getProvisionedThroughput().getWriteCapacityUnits();
 		final ProvisionedThroughput provisionedThroughput = new ProvisionedThroughput().withReadCapacityUnits(reads).withWriteCapacityUnits(writes);
-		final KeySchema keySchema = describeResult.getTable().getKeySchema();
-		final String tableName = describeResult.getTable().getTableName();
+		final KeySchema keySchema = tableDescription.getKeySchema();
+		final String tableName = tableDescription.getTableName();
 
 		return new CreateTableRequest(tableName, keySchema).withProvisionedThroughput(provisionedThroughput);
 	}
@@ -103,9 +111,8 @@ public class DynamoHelper {
 			}
 
 			return false;
-		} catch (AmazonServiceException se) {
-			// Table does not exist anymore
-			return true;
+		} catch (AmazonServiceException exception) {
+			throw exception;
 		}
 	}
 
